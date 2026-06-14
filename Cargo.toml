@@ -15,8 +15,8 @@ name = "slack-search"
 path = "src/main.rs"
 
 [dependencies]
-# Sibling checkout (~/sw/code/apiwright); re-exports the stencil crates.
-apiwright = { path = "../apiwright" }
+# apiwright lives in the stencilwright monorepo (sibling checkout); re-exports the stencil crates.
+apiwright = { path = "../stencilwright/crates/apiwright" }
 
 tokio      = { version = "1", features = ["macros", "rt-multi-thread"] }
 anyhow     = "1"

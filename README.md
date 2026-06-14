@@ -5,7 +5,7 @@ browser, runs date-ranged searches (`from:@me`, `to:@me`, channel, free text),
 and extracts the results as structured rows — **no Slack API token, app install,
 or admin approval required.**
 
-Built on [apiwright](https://github.com/stencilwright/apiwright) (the runtime)
+Built on [apiwright](https://github.com/stencilwright/stencilwright/tree/main/crates/apiwright) (the runtime)
 and mapped with [stencilwright](https://github.com/stencilwright/stencilwright)
 (the masked, LLM-collaborative site-mapper).
 

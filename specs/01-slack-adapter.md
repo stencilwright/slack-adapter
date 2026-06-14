@@ -3,7 +3,7 @@
 Status: **draft**, ready to implement. Skeleton API + CLI in place.
 
 Companions:
-[`apiwright/specs/01-apiwright.md`](https://github.com/stencilwright/apiwright/blob/main/specs/01-apiwright.md)
+[`apiwright/specs/01-apiwright.md`](https://github.com/stencilwright/stencilwright/blob/main/specs/02-apiwright.md)
 (the runtime) and
 [`stencilwright/specs/01-stencil.md`](https://github.com/stencilwright/stencilwright/blob/main/specs/01-stencil.md)
 (the mapping harness). Read both first; this spec assumes their vocabulary
