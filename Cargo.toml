@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.88"
 license = "MIT"
-description = "Turn Slack's web app into a local search API — login + date-ranged search + result extraction, built on apiwright."
+description = "Browser-automation-backed API for Slack — use your own Slack programmatically (search first), built on apiwright."
 
 [lib]
 name = "slack_adapter"
