@@ -55,6 +55,12 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // If this process was re-exec'd as the browser daemon (`slack-search daemon
+    // <dir>`), run it and exit — apiwright spawns it this way.
+    if apiwright::run_if_daemon().await? {
+        return Ok(());
+    }
+
     let args = Args::parse();
 
     let mut q = SearchQuery::new().between(args.from, args.to);

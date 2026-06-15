@@ -396,3 +396,32 @@ All must hold against a real workspace map:
    single workspace.
 7. **Rate / pacing.** Human-like scroll pacing both helps virtualization settle
    and keeps behavior unsurprising; expose the delay as config.
+8. **Native "Open Slack.app?" dialog on `/ssb/redirect`.** After magic-link
+   login, Slack bounces through `<workspace>.slack.com/ssb/redirect`, which
+   invokes the `slack://` protocol and pops Chrome's **native** "Open Slack.app?"
+   dialog. That dialog is browser chrome, not page DOM: apiwright's `page` ops
+   can't click it, and Playwright's `page.on('dialog')` only catches JS dialogs
+   (alert/confirm/prompt/beforeunload), not the external-protocol prompt.
+   **Countermeasure (in use):** drive the web client by navigating directly to
+   `https://app.slack.com/client[/<TEAM_ID>]` (a plain https URL) instead of
+   following any `/ssb/*` deep link — this sidesteps the protocol handler
+   entirely, so the mapped `workspace`/`search_results` places use web-client
+   URLs. Belt-and-suspenders to investigate: a persistent-profile Chrome
+   pref / launch arg to auto-deny external-protocol launches, so a stray `/ssb/`
+   navigation can't strand an unattended (off-screen) run on an unclickable
+   dialog. Observed live while mapping `acme` (2026-06-14).
+9. **Driving search = type-into-button + double-Enter, not URL.** In the IA4
+   client, `?q=…` on `/search` does NOT execute a query (it loads an empty
+   search view). The working drive: type into `[data-qa="top_nav_search"]`,
+   which opens a typeahead over the real input (`[data-qa="texty_input"]`); the
+   query then needs **two** `Enter` presses — the first commits the typeahead
+   entry, the second executes the full-text search. Results render as
+   `[data-qa="search_result"]` rows. The adapter drives this via apiwright's
+   `type` + page-level `key("Enter")` (added to `stencil-browser` for exactly
+   this — `page press`/`type`/`key` + `click --force`). The **permalink** lives
+   in each row's `a.c-timestamp` **`href`** (`/archives/<chan>/p<ts>`), not its
+   text, so the extractor must read the attribute, not `extract_text`. Masking
+   note: Slack puts display names in `data-stringify-text` / `aria-label`
+   attributes, which the masker does not redact — fine for low-stakes Slack, but
+   a known attribute-leak class to harden before any financial-site mapping.
+   Observed live mapping `acme` (2026-06-14).

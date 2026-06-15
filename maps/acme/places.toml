@@ -1,0 +1,138 @@
+# places.toml — graph of recognizable destinations.
+# See specs/01-stencil.md §6 for the format.
+
+target = "acme"
+
+[[place]]
+name = "login_email"
+url = "https://acme-team.slack.com/"
+interactive = true
+
+[place.signature]
+url = "https://acme-team.slack.com/"
+selector = "input[data-qa='email_field']"
+absent_selector = "[data-qa='slack-captcha']"
+
+[place.submit]
+click = "button[data-qa='submit_button']"
+
+[[place.element]]
+name = "email_field"
+selector = "input[data-qa='email_field']"
+auto_fill = "{slack_email}"
+
+[[place.element]]
+name = "password_link"
+selector = "a[data-qa='sign_in_password_link']"
+
+[[place]]
+name = "login_captcha"
+url = "https://acme-team.slack.com/"
+interactive = true
+
+[place.signature]
+url = "https://acme-team.slack.com/"
+selector = "[data-qa='slack-captcha']"
+
+[[place]]
+name = "login_code"
+interactive = true
+
+[place.signature]
+selector = "[data-qa='confirmation_code_input']"
+
+[[place]]
+name = "workspace"
+url = "https://app.slack.com/client/T0000000000"
+
+[place.signature]
+url = "https://app.slack.com/client/T0000000000/**"
+selector = ".p-client_container"
+absent_selector = "[data-qa='search_view']"
+
+[[place]]
+name = "search_results"
+url = "https://app.slack.com/client/T0000000000/search"
+
+[place.signature]
+url = "https://app.slack.com/client/T0000000000/search"
+selector = "[data-qa='search_view']"
+
+[[place.element]]
+name = "search_input"
+selector = "[data-qa='top_nav_search']"
+
+[[place.element]]
+name = "search_box"
+selector = "[data-qa='texty_input']"
+
+# The "Show results for: <query>" typeahead entry — clicking it executes the
+# search (Slack search isn't URL-addressable, so this is the one UI step).
+[[place.element]]
+name = "search_confirm"
+selector = "[role='option'][data-index='0']"
+
+[[place.element]]
+name = "results_container"
+selector = "[data-qa='search_view']"
+
+[[place.element]]
+name = "messages_tab"
+selector = "[data-qa='messages']"
+
+[[place.element]]
+name = "result_row"
+selector = "[data-qa='search_result']"
+
+[[place.element]]
+name = "result_author"
+selector = "[data-qa='message_sender_name']"
+
+[[place.element]]
+name = "result_channel"
+selector = "[data-qa='search_result_channel_name']"
+
+[[place.element]]
+name = "result_permalink"
+selector = "a.c-timestamp"
+
+[[place.element]]
+name = "result_text"
+selector = "[data-qa='message-text']"
+
+# Add [[place]] entries below. Each declares a recognizable
+# destination with a signature (structured URL + required selector +
+# optional visible selector + optional absent selector + optional text). Per-place
+# [[place.element]] entries name selectors used for auto-fill or
+# unmask opt-in.
+#
+# Example interactive login:
+#
+# [[place]]
+# name = "login"
+# interactive = true
+# submit.click = "button[type='submit']"
+# signature.url = "https://example.com/login"
+# signature.selector = "form[action*='/login']"
+# # Use visible_selector when inactive auth panels stay mounted.
+# # signature.visible_selector = "form[action*='/login']"
+# completion.absent_selector = "form[action*='/login']"
+#
+#   [[place.element]]
+#   name = "username_field"
+#   selector = "input[name='username']"
+#   auto_fill = "{my_username}"
+#
+#   [[place.element]]
+#   name = "password_field"
+#   selector = "input[name='password']"
+#   auto_fill = "{my_password}"
+#
+# Example direct-navigation place:
+#
+# [[place]]
+# name = "home"
+# url = "https://example.com/"
+# signature.url = "https://example.com/"
+# signature.selector = "main"
+# signature.absent_selector = "form[action*='/login']"

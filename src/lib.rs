@@ -30,6 +30,11 @@
 
 use chrono::NaiveDate;
 
+use apiwright::{AdapterSession, RuntimeConfig};
+
+mod map;
+mod search;
+
 /// Who a result involves, relative to the authenticated user. Maps to Slack
 /// search modifiers (`from:@me`, `to:@me`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -107,7 +112,48 @@ impl SearchQuery {
     /// Render to one Slack search string per scope (or a single string when no
     /// scope is set). Inclusive `from`/`to` become exclusive `after:`/`before:`.
     pub fn to_slack_queries(&self) -> Vec<String> {
-        todo!("compose modifiers: scope, in:, after:/before: (exclusive), text")
+        // Inclusive [from, to] → Slack's *exclusive* after:/before: bounds.
+        // `after:` excludes the named day, so to include `from` we name the day
+        // before; likewise `before:` excludes its day, so we name the day after
+        // `to`. This off-by-one is the single most error-prone bit of the whole
+        // adapter, which is why it lives here and is unit-tested.
+        let mut dates = String::new();
+        if let Some(from) = self.from {
+            let after = from.pred_opt().unwrap_or(from);
+            dates.push_str(&format!(" after:{}", after.format("%Y-%m-%d")));
+        }
+        if let Some(to) = self.to {
+            let before = to.succ_opt().unwrap_or(to);
+            dates.push_str(&format!(" before:{}", before.format("%Y-%m-%d")));
+        }
+        let channel = self
+            .channel
+            .as_ref()
+            .map(|c| format!(" in:#{}", c.trim_start_matches('#')));
+        let text = self.text.as_ref().map(|t| format!(" {t}"));
+
+        // One query string per scope (unioned by the caller); modifier order:
+        // scope, in:, after:, before:, free text.
+        let render = |scope: Option<Scope>| -> String {
+            let mut q = String::new();
+            if let Some(s) = scope {
+                q.push_str(s.modifier());
+            }
+            if let Some(c) = &channel {
+                q.push_str(c);
+            }
+            q.push_str(&dates);
+            if let Some(t) = &text {
+                q.push_str(t);
+            }
+            q.trim().to_string()
+        };
+
+        if self.scopes.is_empty() {
+            vec![render(None)]
+        } else {
+            self.scopes.iter().map(|s| render(Some(*s))).collect()
+        }
     }
 }
 
@@ -126,26 +172,137 @@ pub struct SearchResult {
 
 /// The Slack adapter handle.
 pub struct Slack {
-    _session: apiwright::AdapterSession,
+    session: AdapterSession,
 }
 
 impl Slack {
-    /// Open the adapter for a mapped Slack workspace (`site` = the
-    /// `stencilwright` map name, e.g. `"acme"`). Logs in via the mapped
-    /// interactive places if the session isn't already authenticated; surfaces
-    /// the window for SSO / 2FA / captcha.
-    pub async fn open(_site: &str) -> anyhow::Result<Self> {
-        todo!("RuntimeConfig::new(site) -> AdapterSession::open; ensure logged in")
+    /// Open the adapter for the embedded workspace map (`site` = the map name,
+    /// e.g. `"acme"`). Reuses the persistent Chrome profile, so most runs
+    /// are already authenticated; otherwise the mapped login places drive what
+    /// they can and surface the window for the magic-link code / SSO / captcha.
+    pub async fn open(site: &str) -> anyhow::Result<Self> {
+        Self::open_with(site, RuntimeConfig::new(site)).await
     }
 
-    /// Open off-screen (surfaces only for login / captcha / on request).
-    pub async fn open_offscreen(_site: &str) -> anyhow::Result<Self> {
-        todo!()
+    /// Open off-screen — surfaces only for login / captcha / on request.
+    pub async fn open_offscreen(site: &str) -> anyhow::Result<Self> {
+        Self::open_with(site, RuntimeConfig::new(site).offscreen()).await
     }
 
-    /// Run a search and extract all matching results — scroll-collected across
-    /// the virtualized results pane, deduped, merged across scopes.
-    pub async fn search(&self, _query: &SearchQuery) -> anyhow::Result<Vec<SearchResult>> {
-        todo!("drive search box per to_slack_queries(); scroll-collect; parse; dedup")
+    async fn open_with(site: &str, cfg: RuntimeConfig) -> anyhow::Result<Self> {
+        let graph = map::load(site)?;
+        let session = AdapterSession::open_with_map(cfg, graph).await?;
+        // Login is lazy: the first `search` navigates to `search_results`, which
+        // (when the persistent profile isn't authenticated) Slack redirects to
+        // the mapped login places — surfacing the window for the magic-link code.
+        // Going straight to the search view also avoids the fragile `workspace`
+        // recognition (Slack restores the last search view on navigation).
+        Ok(Self { session })
+    }
+
+    /// Run a search and extract matching messages, deduped by permalink and
+    /// merged across scopes. Returns the first results screenful (virtualized
+    /// scroll-collect is a follow-up, §7.2).
+    pub async fn search(&self, query: &SearchQuery) -> anyhow::Result<Vec<SearchResult>> {
+        search::run(&self.session, query).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::NaiveDate;
+
+    fn d(y: i32, m: u32, day: u32) -> NaiveDate {
+        NaiveDate::from_ymd_opt(y, m, day).unwrap()
+    }
+
+    #[test]
+    fn spec_example_inclusive_to_exclusive() {
+        // specs/01-slack-adapter.md §6.2: 2026-05-25..=2026-05-31 renders
+        // after:2026-05-24 before:2026-06-01 (the days *outside* the window).
+        let q = SearchQuery::new()
+            .mine()
+            .in_channel("proj-acme")
+            .text("invoice")
+            .between(d(2026, 5, 25), d(2026, 5, 31));
+        assert_eq!(
+            q.to_slack_queries(),
+            vec!["from:@me in:#proj-acme after:2026-05-24 before:2026-06-01 invoice"]
+        );
+    }
+
+    #[test]
+    fn one_query_per_scope() {
+        let q = SearchQuery::new()
+            .mine()
+            .mentions()
+            .between(d(2026, 5, 25), d(2026, 5, 31));
+        assert_eq!(
+            q.to_slack_queries(),
+            vec![
+                "from:@me after:2026-05-24 before:2026-06-01",
+                "to:@me after:2026-05-24 before:2026-06-01",
+            ]
+        );
+    }
+
+    #[test]
+    fn no_scope_is_one_query_without_modifier() {
+        let q = SearchQuery::new()
+            .text("invoice")
+            .between(d(2026, 5, 25), d(2026, 5, 31));
+        assert_eq!(
+            q.to_slack_queries(),
+            vec!["after:2026-05-24 before:2026-06-01 invoice"]
+        );
+    }
+
+    #[test]
+    fn channel_hash_prefix_is_normalized() {
+        let q = SearchQuery::new().mine().in_channel("#general");
+        assert_eq!(q.to_slack_queries(), vec!["from:@me in:#general"]);
+    }
+
+    #[test]
+    fn month_and_year_boundaries_off_by_one() {
+        let q = SearchQuery::new().between(d(2026, 3, 1), d(2026, 12, 31));
+        assert_eq!(
+            q.to_slack_queries(),
+            vec!["after:2026-02-28 before:2027-01-01"]
+        );
+    }
+
+    #[test]
+    fn embedded_acme_map_loads() {
+        let g = crate::map::load("acme").expect("embedded map loads");
+        for p in [
+            "login_email",
+            "login_captcha",
+            "login_code",
+            "workspace",
+            "search_results",
+        ] {
+            assert!(g.place(p).is_some(), "missing place {p}");
+        }
+        let names: Vec<&str> = g
+            .elements_at("search_results")
+            .iter()
+            .map(|e| e.name.as_str())
+            .collect();
+        for e in [
+            "result_row",
+            "result_author",
+            "result_channel",
+            "result_permalink",
+            "result_text",
+        ] {
+            assert!(names.contains(&e), "search_results missing element {e}");
+        }
+    }
+
+    #[test]
+    fn unknown_site_errors() {
+        assert!(crate::map::load("nope").is_err());
     }
 }
