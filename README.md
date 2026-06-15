@@ -22,10 +22,10 @@ let q = SearchQuery::new().mine().mentions()
 let rows = slack.search(&q).await?;   // ts, channel, author, text, permalink
 ```
 
-CLI:
+Dev/test CLI (a harness for exercising the adapter during development — not meant to be installed):
 
 ```sh
-slackctl --site acme --from 2026-05-25 --to 2026-05-31 --mine --mentions
+slack-adapter-test --site acme --from 2026-05-25 --to 2026-05-31 --mine --mentions
 ```
 
 ## Consent first

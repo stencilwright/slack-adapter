@@ -165,7 +165,7 @@ slack-adapter inherits apiwright's model and sets sensible Slack defaults:
 - **Never headless.** Slack *will* sometimes throw a login refresh or a
   challenge; the window must always be surfaceable so the user can intervene.
 
-The principle, concretely: a `slackctl` run that needs a 2FA code snaps the
+The principle, concretely: a `slack-adapter-test` run that needs a 2FA code snaps the
 real Slack window to the foreground, the user types the code, and the run
 continues. Nothing happens in the user's name that the user can't see happen.
 
@@ -364,10 +364,10 @@ impl Slack {
 Design intent: the common case is two lines (`open`, `search`); everything hard
 (login, virtualization, dedup, surfacing) is hidden.
 
-## 9. CLI (`slackctl`)
+## 9. CLI (`slack-adapter-test`)
 
 ```text
-slackctl --site <name> --from <YYYY-MM-DD> --to <YYYY-MM-DD>
+slack-adapter-test --site <name> --from <YYYY-MM-DD> --to <YYYY-MM-DD>
              [--mine] [--mentions] [--channel <name>] [--text <terms>]
              [--offscreen] [--format json|csv]
 ```
@@ -377,7 +377,7 @@ required — default to both if neither given); `--offscreen` for batch;
 `--format` selects JSON (default) or CSV. CSV columns:
 `ts,channel,author,permalink,text`.
 
-The intended weekly flow: run `slackctl` for the billing week, eyeball the
+The intended weekly flow: run `slack-adapter-test` for the billing week, eyeball the
 rows against the Toggl entries, and bill anything the time tracker missed.
 
 ## 10. Mapping artifact sketch (`places.toml`)
@@ -431,7 +431,7 @@ signature.absent_selector = "input[data-qa='login_password']"
 
 All must hold against a real workspace map:
 
-1. `cargo build` produces `slackctl`; `lib` + `bin` compile.
+1. `cargo build` produces `slack-adapter-test`; `lib` + `bin` compile.
 2. From a fresh profile, `Slack::open(site)` reaches `workspace` after the user
    completes SSO/2FA in the **surfaced** window; a second run reuses the profile
    and skips auth.

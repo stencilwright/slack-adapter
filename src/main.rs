@@ -1,7 +1,7 @@
-//! `slackctl` — CLI over [`slack_adapter`].
+//! `slack-adapter-test` — CLI over [`slack_adapter`].
 //!
 //! ```text
-//! slackctl --site acme --from 2026-05-25 --to 2026-05-31 --mine --mentions
+//! slack-adapter-test --site acme --from 2026-05-25 --to 2026-05-31 --mine --mentions
 //! ```
 //!
 //! Prints the matching messages as JSON (default) or CSV. See
@@ -13,7 +13,7 @@ use slack_adapter::{SearchQuery, Slack};
 
 #[derive(Parser, Debug)]
 #[command(
-    name = "slackctl",
+    name = "slack-adapter-test",
     about = "Search your Slack via the web app and print billable-candidate rows"
 )]
 struct Args {
@@ -56,7 +56,7 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // If this process was re-exec'd as the browser daemon (`slackctl daemon
+    // If this process was re-exec'd as the browser daemon (`slack-adapter-test daemon
     // <dir>`), run it and exit — apiwright spawns it this way.
     if apiwright::run_if_daemon().await? {
         return Ok(());
