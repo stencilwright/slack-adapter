@@ -4,7 +4,8 @@
 //! slack-search --site acme --from 2026-05-25 --to 2026-05-31 --mine --mentions
 //! ```
 //!
-//! Skeleton; see `specs/01-slack-adapter.md`.
+//! Prints the matching messages as JSON (default) or CSV. See
+//! `specs/01-slack-adapter.md` for the contract.
 
 use chrono::NaiveDate;
 use clap::Parser;

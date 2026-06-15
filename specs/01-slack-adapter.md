@@ -1,6 +1,10 @@
 # 01 — slack-adapter
 
-Status: **draft**, ready to implement. Skeleton API + CLI in place.
+Status: **implemented (v1)**. The adapter logs in via the embedded site map and
+runs search through Slack's **own browser-automation-backed API** (`search.modules.messages`),
+called from the authenticated page — see **§6.4**. The DOM-driving + scroll-collect
+design (§6.3, §7.1–7.2) is **superseded** by that path but kept for context and as
+a fallback if Slack changes the browser-automation-backed API.
 
 Companions:
 [`apiwright/specs/01-apiwright.md`](https://github.com/stencilwright/stencilwright/blob/main/specs/02-apiwright.md)
@@ -35,8 +39,11 @@ This adapter exists *because* the official API is the wrong tool for this job:
 
 Driving the web client as yourself needs **no token, app, or admin approval**,
 and a user-scoped search returns exactly what that user can already see. The
-trade-off is DOM fragility (§3.4) and Slack's ToS posture on automating the
-client (§12) — both manageable for personal, your-own-access, low-volume use.
+remaining trade-off is Slack's ToS posture on automating the client (§12) —
+manageable for personal, your-own-access, low-volume use. (The original
+DOM-fragility trade-off is largely retired: as implemented the adapter calls
+Slack's *own* browser-automation-backed API from the authenticated page rather than
+scraping the results DOM — §6.4.)
 
 ### Non-goals (v1)
 
@@ -51,16 +58,19 @@ client (§12) — both manageable for personal, your-own-access, low-volume use.
 ## 2. Architecture
 
 ```
-stencilwright  ──maps (masked, once)──▶  ~/.stencilwright/<site>/places.toml …
-                                               │
+stencilwright  ──maps (masked, once)──▶  maps/acme/{places,elements,mask}.toml
+                                               │  (embedded via include_str!)
                                                ▼  (loaded, raw)
 slack-adapter  ───────────────────────▶  apiwright::AdapterSession
-   SearchQuery → Slack search modifiers      │  drive search box, scroll-collect
-   parse rows  ← raw result DOM  ◀───────────┘  surface on login/captcha
+   SearchQuery → Slack modifiers             │  goto workspace → boot (login if needed)
+   parse JSON   ← search.modules.messages ◀──┘  evaluate(): call Slack's browser-automation-backed API
+                  (in-page fetch, authed)       surface on login/captcha
 ```
 
-- **`slack-adapter`** (this repo) holds Slack-specific logic: query → modifier
-  rendering, the search-drive + scroll-collect loop, and result parsing.
+- **`slack-adapter`** (this repo) holds the only Slack-specific logic: query →
+  modifier rendering (§6.2) and the in-page API search (§6.4) — `from:@me`
+  expansion, paging, and JSON→row mapping. The map travels **embedded** in the
+  binary (`maps/acme/…`, `include_str!`), so the adapter is standalone.
 - **`apiwright`** provides the runtime: the raw-DOM browser session, place
   recognition/navigation, extraction primitives, and the visibility/consent
   model. slack-adapter depends on `apiwright` alone (it re-exports the stencil
@@ -207,7 +217,11 @@ SearchQuery::new()
 
 Example rendered query: `from:@me in:#proj-acme after:2026-05-24 before:2026-06-01 invoice`
 
-### 6.3 Driving the search
+### 6.3 Driving the search (SUPERSEDED — see §6.4)
+
+> **Superseded by §6.4.** This UI-driving design worked but was fragile (typeahead
+> timing, virtualized results, two-step Enter). The shipped adapter calls Slack's
+> browser-automation-backed API instead and does **not** drive the search UI. Kept for context.
 
 The `app.slack.com` client is an SPA; the search query is **not reliably URL
 -addressable**, and the date-picker UI is fiddly. So the adapter:
@@ -219,15 +233,65 @@ The `app.slack.com` client is an SPA; the search query is **not reliably URL
 3. ensures the **Messages** results tab is active;
 4. hands off to the extraction loop (§7).
 
+### 6.4 Direct API path (as implemented)
+
+Slack's web client backs message search with a **browser-automation-backed JSON endpoint**,
+`search.modules.messages`. The adapter calls it directly from the authenticated
+page (`apiwright`'s `evaluate` → in-page `fetch`), reusing the browser's session
+`d` cookie and the page's own `xoxc` client token. No Slack app, token grant, or
+admin approval — the request is indistinguishable from the web client's own, and
+it returns **full text, all pages, correct `from:@me`**, with none of the DOM
+fragility (virtualization, lazy headers, typeahead). Discovered by analysis;
+reproduce with `examples/api_discover.rs`.
+
+**Flow** (`src/search.rs`):
+
+1. `goto` the mapped `workspace` URL and wait for the client to boot (so the
+   page holds a fresh token + cookie). If unauthenticated, Slack shows login in
+   the headed window; the call then reports `not_authenticated` until completed.
+2. For each per-scope query string from §6.2, run the in-page search and map the
+   rows; union, dedup by permalink, sort by `ts` ascending (§7.3).
+
+**Request.** `POST https://<team>.slack.com/api/search.modules.messages?<routing>`
+
+- **Cross-origin.** The page is on `app.slack.com` but the API is on
+  `<team>.slack.com`; the **credentialed** (`credentials: include`) call only
+  succeeds with Slack's edge-routing query string. The adapter harvests it from a
+  live `/api/` resource (via the Performance API), else rebuilds a minimal
+  accepted set from local config: `slack_route=<team>`, `_x_version_ts=<build>`
+  (from `localConfig_v2.teams[].versionDataTs`), `_x_frontend_build_type=current`,
+  `_x_desktop_ia=4`, `_x_gantry=true`. (`slack_route` **alone** is rejected.)
+- **Body** (`application/x-www-form-urlencoded`): `token` (the team's `xoxc-…`
+  from `localConfig_v2`), `module=messages`, `query`, `count=100`, `page`,
+  `sort=timestamp`, `sort_dir=asc`, `extra_message_data=1`, `no_user_profile=1`.
+- **`@me` expansion.** `from:@me`/`to:@me` are **UI-only** tokens the API does
+  *not* resolve (they return zero results). The adapter rewrites them to the
+  encoded mention `from:<@Uxxxx>` using `localConfig_v2.teams[].user_id`.
+
+**Response.** `{ ok, pagination:{ total_count, page_count, … }, items:[ … ] }`,
+where each `item` groups by channel: `item.channel = {id, name, …}` and the
+messages are nested in **`item.messages[]`** (each `{ ts, user, username, text,
+permalink, … }`). The adapter flattens `items × messages` into rows. Paging runs
+to `page_count`, capped per scope (a stderr notice fires if the cap truncates).
+Note: bot/attachment-only messages can have empty `text` (the permalink still
+resolves); DM `channel.name` is the other party's user id, not a `#name`.
+
 ## 7. Result extraction
 
-### 7.1 The virtualization problem
+> **§7.1–7.2 are SUPERSEDED by the API path (§6.4).** The JSON API returns full
+> results with full text and server-side paging, so there is no virtualized DOM
+> to scroll-collect. These remain as the documented fallback if the browser-automation-backed API
+> changes. §7.3 (merge scopes) and §7.5 (fields) still apply as written.
+
+### 7.1 The virtualization problem (DOM fallback only)
 
 Slack's results pane is a **virtualized, lazily-loaded** list: only a window of
 rows is in the DOM at once; scrolling materializes more and recycles old nodes.
-A naive "read all rows" gets only the first screenful.
+A naive "read all rows" gets only the first screenful. (Confirmed live: the
+block-kit message body `[data-qa=message-text]` is absent from the raw DOM until
+scrolled — the original reason DOM extraction returned empty `text`.)
 
-### 7.2 Scroll-collect loop (via apiwright's list helper)
+### 7.2 Scroll-collect loop (DOM fallback only — via apiwright's list helper)
 
 ```
 seen = {}                       # dedup set, keyed by permalink (stable per msg)
@@ -253,11 +317,14 @@ also in shouldn't appear twice). Final order: by timestamp ascending.
 
 ### 7.4 Fail-fast on drift
 
-If, after a search that should have matches, the loop finds **no rows and no
-"no results" marker**, or a required per-row element is missing, the adapter
-returns an error naming the suspect place/selectors (§3.4) rather than an empty
-`Vec`. Silent emptiness reads as "nothing billable that week" — a dangerous
-false negative for invoicing.
+Silent emptiness reads as "nothing billable that week" — a dangerous false
+negative for invoicing — so the adapter errors loudly instead. Under the API
+path (§6.4) the drift signals are explicit: a non-`ok` response surfaces Slack's
+`error` (e.g. `not_authenticated` → "complete login"; any other → "token expired
+or the browser-automation-backed API changed"), and a JSON shape that no longer deserializes fails
+with a parse error naming the response. (DOM fallback: zero rows with no
+"no results" marker, or a missing required element, errors naming the suspect
+place/selectors per §3.4.)
 
 ### 7.5 Fields & threads
 
@@ -410,7 +477,9 @@ All must hold against a real workspace map:
    pref / launch arg to auto-deny external-protocol launches, so a stray `/ssb/`
    navigation can't strand an unattended (off-screen) run on an unclickable
    dialog. Observed live while mapping `acme` (2026-06-14).
-9. **Driving search = type-into-button + double-Enter, not URL.** In the IA4
+9. **Driving search = type-into-button + double-Enter, not URL.** *(Superseded
+   by §6.4 — the adapter no longer drives search via the UI. Retained as the
+   DOM-fallback mechanic.)* In the IA4
    client, `?q=…` on `/search` does NOT execute a query (it loads an empty
    search view). The working drive: type into `[data-qa="top_nav_search"]`,
    which opens a typeahead over the real input (`[data-qa="texty_input"]`); the
@@ -425,3 +494,24 @@ All must hold against a real workspace map:
    attributes, which the masker does not redact — fine for low-stakes Slack, but
    a known attribute-leak class to harden before any financial-site mapping.
    Observed live mapping `acme` (2026-06-14).
+10. **Private search API — `@me` and cross-origin routing.** *(The path in use;
+    §6.4 has the full request.)* Two non-obvious live findings: (a) `from:@me`/
+    `to:@me` are **UI-only** — the API returns **zero** results for them, so they
+    must be expanded to `from:<@Uxxxx>` using the user id from
+    `localConfig_v2`; (b) the credentialed cross-origin call from
+    `app.slack.com` to `<team>.slack.com` is **rejected without Slack's edge
+    routing params** — `slack_route` alone is insufficient; the minimal accepted
+    set adds `_x_version_ts`/`_x_frontend_build_type`/`_x_desktop_ia`/`_x_gantry`.
+    Validated live on `acme` (2026-06-14): `from:@me` → 253 of the user's
+    own messages with full text (vs. the DOM path's bots-and-blanks).
+11. **Daemon `stop` doesn't reap its Chrome (stencilwright).** `stencilwright
+    session stop <site>` SIGTERMs the daemon, but the Playwright-launched Chrome
+    holding the `~/.stencilwright/<site>/profile` can survive, keeping the
+    profile `SingletonLock`. The next daemon then launches into the locked
+    profile, Chrome reports *"Opening in existing browser session"*, and attach
+    fails with `TargetClosedError` / "daemon failed to come up". Workaround:
+    `pkill -f "stencilwright/<site>/profile"` then remove `profile/Singleton*`.
+    Better: don't `stop` between adapter runs (the daemon is meant to persist;
+    the deterministic routing-QS fallback in §6.4 removes the only reason we
+    were forcing fresh boots). A stencilwright fix — have the daemon reap its
+    browser on shutdown — is filed in that repo's notes. Observed 2026-06-14.

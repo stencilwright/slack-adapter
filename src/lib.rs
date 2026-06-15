@@ -23,8 +23,10 @@
 //! # Ok(()) }
 //! ```
 //!
-//! **Skeleton.** Method bodies are `todo!()`; the contract is specified in
-//! `specs/01-slack-adapter.md`.
+//! Under the hood the adapter logs in via the embedded site map and runs the
+//! search through Slack's own browser-automation-backed API (`search.modules.messages`),
+//! called from the authenticated page — see [`search`] for the mechanics. The
+//! full contract is specified in `specs/01-slack-adapter.md`.
 //!
 //! [`apiwright`]: https://github.com/stencilwright/apiwright
 
@@ -200,9 +202,10 @@ impl Slack {
         Ok(Self { session })
     }
 
-    /// Run a search and extract matching messages, deduped by permalink and
-    /// merged across scopes. Returns the first results screenful (virtualized
-    /// scroll-collect is a follow-up, §7.2).
+    /// Run a search and return matching messages — full text included, paged
+    /// through Slack's search API, deduped by permalink and merged across
+    /// scopes (sorted by timestamp ascending). Very broad queries are capped
+    /// per scope (with a stderr notice); narrow by date/channel/text for more.
     pub async fn search(&self, query: &SearchQuery) -> anyhow::Result<Vec<SearchResult>> {
         search::run(&self.session, query).await
     }
