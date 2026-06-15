@@ -11,7 +11,7 @@ name = "slack_adapter"
 path = "src/lib.rs"
 
 [[bin]]
-name = "slack-search"
+name = "slackctl"
 path = "src/main.rs"
 
 [dependencies]

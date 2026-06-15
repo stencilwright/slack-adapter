@@ -25,20 +25,8 @@ let rows = slack.search(&q).await?;   // ts, channel, author, text, permalink
 CLI:
 
 ```sh
-slack-search --site acme --from 2026-05-25 --to 2026-05-31 --mine --mentions
+slackctl --site acme --from 2026-05-25 --to 2026-05-31 --mine --mentions
 ```
-
-## Why browser automation?
-
-Slack's official `search.messages` method is deprecated, and its replacement is
-gated behind directory-published / internal apps, admin install, and (for
-semantic search) a paid AI plan. On a *client's* workspace you're usually a
-member, not an admin — so that route is closed to you.
-
-Browser automation needs none of it. The adapter acts with exactly your access,
-in your own authenticated session: it only ever sees what you can already see,
-and because it drives the real web app, results come back complete and
-structured. See [specs/01-slack-adapter.md](specs/01-slack-adapter.md) §1.
 
 ## Consent first
 
