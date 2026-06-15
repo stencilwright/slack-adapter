@@ -1,13 +1,15 @@
 # slack-adapter
 
-**Turn Slack's web app into a local search API.** Logs in as *you* in a real
-browser, runs date-ranged searches (`from:@me`, `to:@me`, channel, free text),
-and extracts the results as structured rows — **no Slack API token, app install,
-or admin approval required.**
+**Use your Slack programmatically — on your terms.** Drives the Slack web app in
+a real browser *as you*, so what you can already do by hand becomes something you
+can script. First capability: structured, date-ranged message search
+(`from:@me`, `to:@me`, channel, free text) → rows of `ts, channel, author, text,
+permalink`. **No bot token, app install, or admin approval.**
 
-Built on [apiwright](https://github.com/stencilwright/stencilwright/tree/main/crates/apiwright) (the runtime)
-and mapped with [stencilwright](https://github.com/stencilwright/stencilwright)
-(the masked, LLM-collaborative site-mapper).
+Built on [apiwright](https://github.com/stencilwright/stencilwright/tree/main/crates/apiwright)
+(the runtime) and mapped with [stencilwright](https://github.com/stencilwright/stencilwright)
+(the masked, LLM-collaborative site-mapper). Search is the first interaction
+mapped — the same approach extends to anything the web app can do.
 
 ```rust
 use chrono::NaiveDate;
@@ -26,19 +28,17 @@ CLI:
 slack-search --site acme --from 2026-05-25 --to 2026-05-31 --mine --mentions
 ```
 
-## Why browser-driven, not the official Slack API?
+## Why browser automation?
 
-Slack's official `search.messages` method is deprecated; its replacement is
+Slack's official `search.messages` method is deprecated, and its replacement is
 gated behind directory-published / internal apps, admin install, and (for
-semantic search) a paid AI plan. On a *client's* workspace you're typically a
-member, not an admin. Driving the web client as yourself needs none of that —
-and a user's search only ever sees what that user can already see.
+semantic search) a paid AI plan. On a *client's* workspace you're usually a
+member, not an admin — so that route is closed to you.
 
-The search itself isn't scraped from the page: the adapter calls Slack's **own
-browser-automation-backed API** (`search.modules.messages`) from the authenticated session —
-the exact request the web client makes — which is what yields full message text,
-every page, and correct `from:@me` / `to:@me`. Rationale and mechanics:
-[specs/01-slack-adapter.md](specs/01-slack-adapter.md) (§1, §6.4).
+Browser automation needs none of it. The adapter acts with exactly your access,
+in your own authenticated session: it only ever sees what you can already see,
+and because it drives the real web app, results come back complete and
+structured. See [specs/01-slack-adapter.md](specs/01-slack-adapter.md) §1.
 
 ## Consent first
 
