@@ -26,14 +26,19 @@ CLI:
 slack-search --site acme --from 2026-05-25 --to 2026-05-31 --mine --mentions
 ```
 
-## Why browser-driven, not the Slack API?
+## Why browser-driven, not the official Slack API?
 
-Slack's `search.messages` API method is deprecated; its replacement is gated
-behind directory-published / internal apps, admin install, and (for semantic
-search) a paid AI plan. On a *client's* workspace you're typically a member, not
-an admin. Driving the web client as yourself needs none of that — and a user's
-search only ever sees what that user can already see. See
-[specs/01-slack-adapter.md](specs/01-slack-adapter.md) §1.
+Slack's official `search.messages` method is deprecated; its replacement is
+gated behind directory-published / internal apps, admin install, and (for
+semantic search) a paid AI plan. On a *client's* workspace you're typically a
+member, not an admin. Driving the web client as yourself needs none of that —
+and a user's search only ever sees what that user can already see.
+
+The search itself isn't scraped from the page: the adapter calls Slack's **own
+browser-automation-backed API** (`search.modules.messages`) from the authenticated session —
+the exact request the web client makes — which is what yields full message text,
+every page, and correct `from:@me` / `to:@me`. Rationale and mechanics:
+[specs/01-slack-adapter.md](specs/01-slack-adapter.md) (§1, §6.4).
 
 ## Consent first
 
@@ -43,9 +48,10 @@ brings the window forward. You can always watch what's being done in your name.
 
 ## Status
 
-Skeleton + full spec. The mapping flow, search/extraction loop, API, and CLI are
-specified in [specs/01-slack-adapter.md](specs/01-slack-adapter.md);
-implementation is in progress.
+**Working end-to-end** — login, date-ranged search, and structured results
+(deduped across scopes, sorted) are implemented and validated against a live
+workspace. Full library API and CLI reference:
+[specs/01-slack-adapter.md](specs/01-slack-adapter.md).
 
 ## License
 
