@@ -100,6 +100,13 @@ async fn run_query(session: &AdapterSession, query: &str) -> Result<Vec<SearchRe
                 "not signed in to Slack — complete login in the browser window, then re-run"
             );
         }
+        if err == "no_user_id" {
+            bail!(
+                "query scopes to `@me` but the active workspace has no user_id in local \
+                 config — reopen the workspace so the web client rehydrates, or remove the \
+                 @me scope"
+            );
+        }
         bail!(
             "Slack's search endpoint returned error '{err}' for query '{query}' \
              (the session token may have expired, or the browser-automation-backed API changed)"
@@ -165,7 +172,10 @@ const SEARCH_JS: &str = r#"
   const token = t.token;
   if (!token) return { error: 'not_authenticated' };
   const teamBase = (t.url || location.origin).replace(/\/$/, '');
-  const userId = t.user_id || '';
+  // The authenticated user id lives under `user_id` in current client builds
+  // and `self_id` in older ones (see examples/api_discover.rs) — read both so
+  // the @me guard below only fires when neither is present.
+  const userId = t.user_id || t.self_id || '';
 
   // Edge-routing query string. Prefer harvesting it from a live /api/ call (the
   // most faithful, picks up the current build params); otherwise rebuild a
@@ -187,11 +197,14 @@ const SEARCH_JS: &str = r#"
   }
 
   // `@me` is a UI-only token the API doesn't resolve — expand to the encoded
-  // user mention so `from:`/`to:` scope to the authenticated user.
-  const query = userId
-    ? QUERY.replace(/from:@me\b/g, 'from:<@' + userId + '>')
-           .replace(/to:@me\b/g, 'to:<@' + userId + '>')
-    : QUERY;
+  // user mention so `from:`/`to:` scope to the authenticated user. If the query
+  // asks for `@me` but local config carries no user_id, fail loudly: replaying
+  // the bare token makes the API return zero rows, which reads as "no matches"
+  // rather than the misconfiguration it is.
+  const wantsMe = /(?:from|to):@me\b/.test(QUERY);
+  if (wantsMe && !userId) return { error: 'no_user_id' };
+  const query = QUERY.replace(/from:@me\b/g, 'from:<@' + userId + '>')
+                     .replace(/to:@me\b/g, 'to:<@' + userId + '>');
 
   async function fetchPage(page) {
     const f = new URLSearchParams();
