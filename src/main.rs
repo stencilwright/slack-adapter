@@ -1,15 +1,17 @@
 //! `slack-adapter-test` — CLI over [`slack_adapter`].
 //!
 //! ```text
-//! slack-adapter-test --site acme --from 2026-05-25 --to 2026-05-31 --mine --mentions
+//! slack-adapter-test --workspace acme-team --team-id T0XXXXXXXX \
+//!     --from 2026-05-25 --to 2026-05-31 --mine --mentions
 //! ```
 //!
 //! Prints the matching messages as JSON (default) or CSV. See
 //! `specs/01-slack-adapter.md` for the contract.
 
+use anyhow::Context;
 use chrono::NaiveDate;
 use clap::Parser;
-use slack_adapter::{SearchQuery, Slack};
+use slack_adapter::{SearchQuery, Slack, SlackConfig};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -17,9 +19,24 @@ use slack_adapter::{SearchQuery, Slack};
     about = "Search your Slack via the web app and print billable-candidate rows"
 )]
 struct Args {
-    /// stencilwright map name for the workspace (e.g. "acme").
+    /// Local profile name under ~/.stencilwright/<instance>/ — keeps multiple
+    /// workspaces' sessions (and logins) separate.
+    #[arg(long, default_value = "slack")]
+    instance: String,
+
+    /// Your workspace login subdomain — the `your-team` in your-team.slack.com.
     #[arg(long)]
-    site: String,
+    workspace: String,
+
+    /// Your team id — the T0XXXXXXXX in app.slack.com/client/T0XXXXXXXX
+    /// (visible in the address bar once you're signed in).
+    #[arg(long)]
+    team_id: String,
+
+    /// Extra runtime value as NAME=REF (repeatable), e.g.
+    /// slack_email=secret://1password/Private/Slack/username
+    #[arg(long = "value", value_name = "NAME=REF")]
+    values: Vec<String>,
 
     /// Inclusive start date (YYYY-MM-DD).
     #[arg(long)]
@@ -78,10 +95,18 @@ async fn main() -> anyhow::Result<()> {
         q = q.text(t);
     }
 
+    let mut config = SlackConfig::new(args.workspace.as_str(), args.team_id.as_str());
+    for v in &args.values {
+        let (name, reference) = v
+            .split_once('=')
+            .context("--value must be NAME=REF (e.g. slack_email=secret://…)")?;
+        config = config.value(name, reference);
+    }
+
     let slack = if args.offscreen {
-        Slack::open_offscreen(&args.site).await?
+        Slack::open_offscreen(&args.instance, &config).await?
     } else {
-        Slack::open(&args.site).await?
+        Slack::open(&args.instance, &config).await?
     };
 
     let results = slack.search(&q).await?;

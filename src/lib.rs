@@ -11,7 +11,11 @@
 //! # use slack_adapter::*;
 //! # async fn demo() -> anyhow::Result<()> {
 //! use chrono::NaiveDate;
-//! let slack = Slack::open("acme").await?;
+//! // Point the embedded map at *your* workspace — no fork required.
+//! let slack = Slack::open(
+//!     "acme",                                       // local profile name
+//!     &SlackConfig::new("acme-team", "T0XXXXXXXX"), // your subdomain + team id
+//! ).await?;
 //! let q = SearchQuery::new()
 //!     .mine()        // messages you sent
 //!     .mentions()    // + messages mentioning / DM'd to you
@@ -23,12 +27,14 @@
 //! # Ok(()) }
 //! ```
 //!
-//! Under the hood the adapter logs in via the embedded site map and runs the
+//! Under the hood the adapter logs in via the embedded Slack map and runs the
 //! search by calling Slack's own JSON endpoint (`search.modules.messages`),
 //! called from the authenticated page — see [`search`] for the mechanics. The
 //! full contract is specified in `specs/01-slack-adapter.md`.
 //!
 //! [`apiwright`]: https://github.com/stencilwright/apiwright
+
+use std::collections::BTreeMap;
 
 use chrono::NaiveDate;
 
@@ -172,27 +178,78 @@ pub struct SearchResult {
     pub permalink: String,
 }
 
+/// Per-user configuration that points the embedded Slack map at *your*
+/// workspace, so you use the published crate as-is rather than forking it.
+///
+/// - `workspace` — your login subdomain: the `your-team` in
+///   `https://your-team.slack.com/`. A pasted `https://…` or trailing
+///   `.slack.com` is tolerated.
+/// - `team_id` — the internal id in the signed-in URL
+///   `https://app.slack.com/client/T0XXXXXXXX` (starts with `T`, or `E` on
+///   Enterprise Grid); it's in your address bar once you're in Slack.
+/// - `values` — optional `name → reference` pairs merged into the map's runtime
+///   values; e.g. `slack_email` → `secret://1password/<vault>/<item>/username`
+///   to auto-fill login.
+#[derive(Debug, Clone)]
+pub struct SlackConfig {
+    pub workspace: String,
+    pub team_id: String,
+    pub values: BTreeMap<String, String>,
+}
+
+impl SlackConfig {
+    /// Build from your workspace subdomain and team id.
+    pub fn new(workspace: impl Into<String>, team_id: impl Into<String>) -> Self {
+        Self {
+            workspace: workspace.into(),
+            team_id: team_id.into(),
+            values: BTreeMap::new(),
+        }
+    }
+
+    /// Attach a runtime value/secret reference (e.g. `slack_email` for login
+    /// auto-fill). Chainable.
+    pub fn value(mut self, name: impl Into<String>, reference: impl Into<String>) -> Self {
+        self.values.insert(name.into(), reference.into());
+        self
+    }
+
+    /// The bare workspace subdomain, tolerating a pasted full URL, a
+    /// `.slack.com` suffix, or a trailing slash.
+    pub(crate) fn workspace_subdomain(&self) -> &str {
+        let s = self
+            .workspace
+            .trim()
+            .trim_start_matches("https://")
+            .trim_start_matches("http://")
+            .trim_end_matches('/');
+        s.strip_suffix(".slack.com").unwrap_or(s)
+    }
+}
+
 /// The Slack adapter handle.
 pub struct Slack {
     session: AdapterSession,
 }
 
 impl Slack {
-    /// Open the adapter for the embedded workspace map (`site` = the map name,
-    /// e.g. `"acme"`). Reuses the persistent Chrome profile, so most runs
-    /// are already authenticated; otherwise the mapped login places drive what
-    /// they can and surface the window for the magic-link code / SSO / captcha.
-    pub async fn open(site: &str) -> anyhow::Result<Self> {
-        Self::open_with(site, RuntimeConfig::new(site)).await
+    /// Open the adapter for `config`'s Slack workspace. `instance` names the
+    /// local profile under `~/.stencilwright/<instance>/`, so you can keep
+    /// several workspaces' sessions side by side. Reuses the persistent Chrome
+    /// profile, so most runs are already authenticated; otherwise the mapped
+    /// login places drive what they can and surface the window for the
+    /// magic-link code / SSO / captcha.
+    pub async fn open(instance: &str, config: &SlackConfig) -> anyhow::Result<Self> {
+        Self::open_with(config, RuntimeConfig::new(instance)).await
     }
 
     /// Open off-screen — surfaces only for login / captcha / on request.
-    pub async fn open_offscreen(site: &str) -> anyhow::Result<Self> {
-        Self::open_with(site, RuntimeConfig::new(site).offscreen()).await
+    pub async fn open_offscreen(instance: &str, config: &SlackConfig) -> anyhow::Result<Self> {
+        Self::open_with(config, RuntimeConfig::new(instance).offscreen()).await
     }
 
-    async fn open_with(site: &str, cfg: RuntimeConfig) -> anyhow::Result<Self> {
-        let graph = map::load(site)?;
+    async fn open_with(config: &SlackConfig, cfg: RuntimeConfig) -> anyhow::Result<Self> {
+        let graph = map::load(config)?;
         let session = AdapterSession::open_with_map(cfg, graph).await?;
         // Login is lazy: the first `search` navigates to `search_results`, which
         // (when the persistent profile isn't authenticated) Slack redirects to
@@ -276,9 +333,13 @@ mod tests {
         );
     }
 
+    fn test_config() -> SlackConfig {
+        SlackConfig::new("acme-team", "T0AAAAAAAAA")
+    }
+
     #[test]
-    fn embedded_acme_map_loads() {
-        let g = crate::map::load("acme").expect("embedded map loads");
+    fn embedded_map_loads() {
+        let g = crate::map::load(&test_config()).expect("embedded map loads");
         for p in [
             "login_email",
             "login_captcha",
@@ -305,7 +366,50 @@ mod tests {
     }
 
     #[test]
-    fn unknown_site_errors() {
-        assert!(crate::map::load("nope").is_err());
+    fn config_fills_workspace_and_team_id_placeholders() {
+        let g = crate::map::load(&test_config()).expect("embedded map loads");
+        let workspace_url = g
+            .place("workspace")
+            .and_then(|p| p.url.clone())
+            .expect("workspace url");
+        assert!(
+            workspace_url.contains("T0AAAAAAAAA"),
+            "team_id substituted into nav url: {workspace_url}"
+        );
+        assert_eq!(
+            g.place("login_email").and_then(|p| p.url.clone()).as_deref(),
+            Some("https://acme-team.slack.com/")
+        );
+        // No template placeholder leaks through any rendered place url.
+        for name in ["login_email", "login_captcha", "workspace", "search_results"] {
+            if let Some(url) = g.place(name).and_then(|p| p.url.clone()) {
+                assert!(
+                    !url.contains("{team_id}") && !url.contains("{workspace}"),
+                    "unresolved placeholder in {name}: {url}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn empty_identifiers_are_rejected() {
+        assert!(crate::map::load(&SlackConfig::new("", "T0X")).is_err());
+        assert!(crate::map::load(&SlackConfig::new("acme-team", "")).is_err());
+    }
+
+    #[test]
+    fn workspace_subdomain_tolerates_pasted_url() {
+        assert_eq!(
+            SlackConfig::new("acme-team", "T0X").workspace_subdomain(),
+            "acme-team"
+        );
+        assert_eq!(
+            SlackConfig::new("https://acme-team.slack.com/", "T0X").workspace_subdomain(),
+            "acme-team"
+        );
+        assert_eq!(
+            SlackConfig::new("acme-team.slack.com", "T0X").workspace_subdomain(),
+            "acme-team"
+        );
     }
 }

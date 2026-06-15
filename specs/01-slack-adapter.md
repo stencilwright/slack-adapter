@@ -52,13 +52,13 @@ reading the results DOM — §6.4.)
   user opens the thread to read context (§7.5).
 - Bulk export of other people's content. Results are bounded to the user's own
   searches over their own access.
-- Multi-workspace fan-out in one call. One adapter instance = one mapped
-  workspace; the caller loops if they have several.
+- Multi-workspace fan-out in one call. One adapter instance = one workspace
+  (a `SlackConfig` + its own profile); the caller loops if they have several.
 
 ## 2. Architecture
 
 ```
-stencilwright  ──maps (masked, once)──▶  maps/acme/{places,elements,mask}.toml
+stencilwright  ──maps (masked, once)──▶  maps/slack/{places,elements,mask}.toml
                                                │  (embedded via include_str!)
                                                ▼  (loaded, raw)
 slack-adapter  ───────────────────────▶  apiwright::AdapterSession
@@ -70,7 +70,8 @@ slack-adapter  ─────────────────────�
 - **`slack-adapter`** (this repo) holds the only Slack-specific logic: query →
   modifier rendering (§6.2) and the in-page API search (§6.4) — `from:@me`
   expansion, paging, and JSON→row mapping. The map travels **embedded** in the
-  binary (`maps/acme/…`, `include_str!`), so the adapter is standalone.
+  binary (`maps/slack/…`, `include_str!`) as a template, so the adapter is
+  standalone.
 - **`apiwright`** provides the runtime: the raw-DOM browser session, place
   recognition/navigation, extraction primitives, and the visibility/consent
   model. slack-adapter depends on `apiwright` alone (it re-exports the stencil
@@ -78,8 +79,12 @@ slack-adapter  ─────────────────────�
 - **`stencilwright`** is not a runtime dependency. It is the *tool you use to
   build and maintain the map* this adapter consumes (§3).
 
-`site` throughout is the stencilwright map name for a workspace (e.g.
-`acme`), so a user with several client Slacks keeps one map each.
+The embedded map is a **generic Slack template** — it carries no
+workspace-specific ids. A caller supplies a `SlackConfig` (workspace subdomain +
+team id, which fill the map's `{workspace}` / `{team_id}` placeholders) and an
+`instance` name selecting the local profile under `~/.stencilwright/<instance>/`.
+So anyone uses the published crate against their own workspace without forking
+it, and a user with several Slacks just opens one instance each.
 
 ## 3. Building & maintaining the adapter with stencilwright
 
@@ -112,6 +117,12 @@ captchas, completes SSO/2FA, and clicks **Approve** in the native dialog for any
 element whose text should be unmasked (for Slack, almost nothing needs
 unmasking to *map* — structure is enough; the real text is read later by the
 adapter via apiwright's raw path, which the user runs).
+
+Before the freshly-mapped TOML is committed to `maps/slack/`, **genericize the
+workspace identifiers**: replace the concrete login subdomain with `{workspace}`
+and the team id in the `app.slack.com/client/<TEAM_ID>` URLs with `{team_id}`.
+Those placeholders are filled per-user from `SlackConfig` at load (§2), so the
+committed map stays workspace-agnostic — anyone runs it without forking.
 
 ### 3.2 Places to map
 
@@ -157,8 +168,8 @@ silently returning empty/garbage (§7.4).
 
 slack-adapter inherits apiwright's model and sets sensible Slack defaults:
 
-- **Headed by default.** `Slack::open(site)` opens a visible window.
-- **Off-screen opt-in.** `Slack::open_offscreen(site)` runs off-screen with the
+- **Headed by default.** `Slack::open(instance, &config)` opens a visible window.
+- **Off-screen opt-in.** `Slack::open_offscreen(instance, &config)` runs off-screen with the
   default [`SurfacePolicy`] (surface on login, captcha, unrecognized, consent;
   `Requested` always surfaces). Right for a weekly batch the user kicks off and
   glances at only if it needs them.
@@ -173,10 +184,10 @@ continues. Nothing happens in the user's name that the user can't see happen.
 
 `Slack::open` ensures an authenticated session:
 
-1. `AdapterSession::open(RuntimeConfig::new(site))` attaches the raw daemon and
-   loads the map. The persistent Chrome profile under
-   `~/.stencilwright/<site>/profile/` usually means the user is *already* logged
-   in — most runs skip auth entirely.
+1. The adapter fills the embedded map template from the `SlackConfig` and
+   attaches the raw daemon (`AdapterSession::open_with_map`). The persistent
+   Chrome profile under `~/.stencilwright/<instance>/profile/` usually means the
+   user is *already* logged in — most runs skip auth entirely.
 2. If recognition lands on an auth place, the runner auto-fills
    `slack_email`/`slack_password` from `values.toml`, submits, and for
    `login_totp` resolves the trailing-`?` OTP just in time.
@@ -353,10 +364,18 @@ impl SearchQuery {
 pub struct SearchResult { pub ts: String, pub channel: String,
                           pub author: String, pub text: String, pub permalink: String }
 
+pub struct SlackConfig { pub workspace: String, pub team_id: String,
+                         pub values: BTreeMap<String, String> }
+impl SlackConfig {
+    pub fn new(workspace: impl Into<String>, team_id: impl Into<String>) -> Self;
+    pub fn value(self, name: impl Into<String>, reference: impl Into<String>) -> Self; // chainable
+}
+
 pub struct Slack { /* … */ }
 impl Slack {
-    pub async fn open(site: &str) -> anyhow::Result<Self>;            // headed
-    pub async fn open_offscreen(site: &str) -> anyhow::Result<Self>;  // surfaceable
+    // `instance` = local profile name; `config` points the map at your workspace.
+    pub async fn open(instance: &str, config: &SlackConfig) -> anyhow::Result<Self>;            // headed
+    pub async fn open_offscreen(instance: &str, config: &SlackConfig) -> anyhow::Result<Self>;  // surfaceable
     pub async fn search(&self, q: &SearchQuery) -> anyhow::Result<Vec<SearchResult>>;
 }
 ```
@@ -367,7 +386,9 @@ Design intent: the common case is two lines (`open`, `search`); everything hard
 ## 9. CLI (`slack-adapter-test`)
 
 ```text
-slack-adapter-test --site <name> --from <YYYY-MM-DD> --to <YYYY-MM-DD>
+slack-adapter-test --workspace <subdomain> --team-id <T0…>
+             --from <YYYY-MM-DD> --to <YYYY-MM-DD>
+             [--instance <name>] [--value NAME=REF]...
              [--mine] [--mentions] [--channel <name>] [--text <terms>]
              [--offscreen] [--format json|csv]
 ```
@@ -432,7 +453,7 @@ signature.absent_selector = "input[data-qa='login_password']"
 All must hold against a real workspace map:
 
 1. `cargo build` produces `slack-adapter-test`; `lib` + `bin` compile.
-2. From a fresh profile, `Slack::open(site)` reaches `workspace` after the user
+2. From a fresh profile, `Slack::open(instance, &config)` reaches `workspace` after the user
    completes SSO/2FA in the **surfaced** window; a second run reuses the profile
    and skips auth.
 3. `to_slack_queries()` unit tests pin the **exclusive-boundary** date math and
@@ -457,8 +478,9 @@ All must hold against a real workspace map:
    a raw `@displayname` text search as a complement.
 4. **Free vs paid retention.** On free workspaces, history/search is limited to a
    retention window; results outside it simply won't exist.
-5. **Team-id discovery.** Map `{team_id}` per workspace (a `value`), or detect
-   from the post-login URL.
+5. **Team-id discovery.** The caller supplies `team_id` and the workspace
+   subdomain via `SlackConfig`; both fill the map template at load. Find the
+   team id in the post-login URL `app.slack.com/client/T0…`.
 6. **Enterprise Grid org search.** Cross-workspace search differs; v1 targets a
    single workspace.
 7. **Rate / pacing.** Human-like scroll pacing both helps virtualization settle

@@ -1,15 +1,15 @@
 # places.toml — graph of recognizable destinations.
 # See specs/01-stencil.md §6 for the format.
 
-target = "acme"
+target = "slack"
 
 [[place]]
 name = "login_email"
-url = "https://acme-team.slack.com/"
+url = "https://{workspace}.slack.com/"
 interactive = true
 
 [place.signature]
-url = "https://acme-team.slack.com/"
+url = "https://{workspace}.slack.com/"
 selector = "input[data-qa='email_field']"
 absent_selector = "[data-qa='slack-captcha']"
 
@@ -27,11 +27,11 @@ selector = "a[data-qa='sign_in_password_link']"
 
 [[place]]
 name = "login_captcha"
-url = "https://acme-team.slack.com/"
+url = "https://{workspace}.slack.com/"
 interactive = true
 
 [place.signature]
-url = "https://acme-team.slack.com/"
+url = "https://{workspace}.slack.com/"
 selector = "[data-qa='slack-captcha']"
 
 [[place]]
@@ -43,19 +43,19 @@ selector = "[data-qa='confirmation_code_input']"
 
 [[place]]
 name = "workspace"
-url = "https://app.slack.com/client/T0000000000"
+url = "https://app.slack.com/client/{team_id}"
 
 [place.signature]
-url = "https://app.slack.com/client/T0000000000/**"
+url = "https://app.slack.com/client/{team_id}/**"
 selector = ".p-client_container"
 absent_selector = "[data-qa='search_view']"
 
 [[place]]
 name = "search_results"
-url = "https://app.slack.com/client/T0000000000/search"
+url = "https://app.slack.com/client/{team_id}/search"
 
 [place.signature]
-url = "https://app.slack.com/client/T0000000000/search"
+url = "https://app.slack.com/client/{team_id}/search"
 selector = "[data-qa='search_view']"
 
 [[place.element]]

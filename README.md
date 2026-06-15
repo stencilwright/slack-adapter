@@ -11,11 +11,15 @@ Built on [apiwright](https://github.com/stencilwright/stencilwright/tree/main/cr
 (the masked, LLM-collaborative site-mapper). Search is the first interaction
 mapped — the same approach extends to anything the web app can do.
 
+The crate ships a generic Slack map; you point it at your own workspace with
+`SlackConfig` (subdomain + team id) — nothing to fork, no per-workspace build.
+
 ```rust
 use chrono::NaiveDate;
-use slack_adapter::{Slack, SearchQuery};
+use slack_adapter::{Slack, SlackConfig, SearchQuery};
 
-let slack = Slack::open("acme").await?;
+// Point the published crate at *your* workspace — subdomain + team id. No fork.
+let slack = Slack::open("acme", &SlackConfig::new("acme-team", "T0XXXXXXXX")).await?;
 let q = SearchQuery::new().mine().mentions()
     .between(NaiveDate::from_ymd_opt(2026,5,25).unwrap(),
              NaiveDate::from_ymd_opt(2026,5,31).unwrap());
@@ -25,7 +29,8 @@ let rows = slack.search(&q).await?;   // ts, channel, author, text, permalink
 Dev/test CLI (a harness for exercising the adapter during development — not meant to be installed):
 
 ```sh
-slack-adapter-test --site acme --from 2026-05-25 --to 2026-05-31 --mine --mentions
+slack-adapter-test --workspace acme-team --team-id T0XXXXXXXX \
+    --from 2026-05-25 --to 2026-05-31 --mine --mentions
 ```
 
 ## Consent first
