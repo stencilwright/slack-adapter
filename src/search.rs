@@ -1,7 +1,7 @@
 //! Running Slack's search through its internal JSON API.
 //!
 //! Slack's web client backs message search with a browser-automation-backed JSON endpoint,
-//! `search.modules.messages`. Instead of typing into the UI and scraping the
+//! `search.modules.messages`. Instead of typing into the UI and reading the
 //! (virtualized) result DOM, the adapter calls that endpoint directly from the
 //! authenticated page — reusing the browser's session `d` cookie and the
 //! page's own `xoxc` client token — so no Slack app, token grant, or admin
@@ -92,7 +92,7 @@ async fn run_query(session: &AdapterSession, query: &str) -> Result<Vec<SearchRe
         .await
         .context("calling Slack's search.modules.messages API")?;
     let resp: ApiResponse =
-        serde_json::from_value(v).context("parsing the Slack search API response")?;
+        serde_json::from_value(v).context("parsing the Slack search response")?;
 
     if let Some(err) = resp.error {
         if err == "not_authenticated" {
@@ -101,7 +101,7 @@ async fn run_query(session: &AdapterSession, query: &str) -> Result<Vec<SearchRe
             );
         }
         bail!(
-            "Slack search API returned error '{err}' for query '{query}' \
+            "Slack's search endpoint returned error '{err}' for query '{query}' \
              (the session token may have expired, or the browser-automation-backed API changed)"
         );
     }

@@ -43,7 +43,7 @@ remaining trade-off is Slack's ToS posture on automating the client (§12) —
 manageable for personal, your-own-access, low-volume use. (The original
 DOM-fragility trade-off is largely retired: as implemented the adapter calls
 Slack's *own* browser-automation-backed API from the authenticated page rather than
-scraping the results DOM — §6.4.)
+reading the results DOM — §6.4.)
 
 ### Non-goals (v1)
 
@@ -494,7 +494,7 @@ All must hold against a real workspace map:
    attributes, which the masker does not redact — fine for low-stakes Slack, but
    a known attribute-leak class to harden before any financial-site mapping.
    Observed live mapping `acme` (2026-06-14).
-10. **Private search API — `@me` and cross-origin routing.** *(The path in use;
+10. **Browser-automation-backed search — `@me` and cross-origin routing.** *(The path in use;
     §6.4 has the full request.)* Two non-obvious live findings: (a) `from:@me`/
     `to:@me` are **UI-only** — the API returns **zero** results for them, so they
     must be expanded to `from:<@Uxxxx>` using the user id from

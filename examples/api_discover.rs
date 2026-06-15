@@ -1,4 +1,4 @@
-//! Discovery tool for the **direct Slack API path** (no-PII acme only).
+//! Discovery tool for the browser-automation search path (no-PII workspace only).
 //!
 //! Navigates to the workspace, then — entirely in-page — reads the active
 //! team's `xoxc` token from `localStorage.localConfig_v2` and replays a real
@@ -10,8 +10,8 @@
 //! cargo run --example api_discover
 //! ```
 //!
-//! Goal: validate that the adapter can query Slack's own JSON search API
-//! directly instead of scraping the virtualized DOM. If `api.ok == true`, the
+//! Goal: validate that the adapter can query Slack's own search endpoint
+//! directly instead of reading the virtualized DOM. If `api.ok == true`, the
 //! refactor in `src/search.rs` is unblocked.
 
 use std::time::Duration;

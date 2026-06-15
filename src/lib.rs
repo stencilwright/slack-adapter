@@ -1,4 +1,4 @@
-//! # slack-adapter — a local search API over Slack's web app
+//! # slack-adapter — a browser-automation-backed API over Slack's web app
 //!
 //! Drives the Slack web client (as *you*, in a real browser via
 //! [`apiwright`]) to run date-ranged searches and extract the results as
@@ -24,7 +24,7 @@
 //! ```
 //!
 //! Under the hood the adapter logs in via the embedded site map and runs the
-//! search through Slack's own browser-automation-backed API (`search.modules.messages`),
+//! search by calling Slack's own JSON endpoint (`search.modules.messages`),
 //! called from the authenticated page — see [`search`] for the mechanics. The
 //! full contract is specified in `specs/01-slack-adapter.md`.
 //!
@@ -203,7 +203,7 @@ impl Slack {
     }
 
     /// Run a search and return matching messages — full text included, paged
-    /// through Slack's search API, deduped by permalink and merged across
+    /// through Slack's search endpoint, deduped by permalink and merged across
     /// scopes (sorted by timestamp ascending). Very broad queries are capped
     /// per scope (with a stderr notice); narrow by date/channel/text for more.
     pub async fn search(&self, query: &SearchQuery) -> anyhow::Result<Vec<SearchResult>> {
